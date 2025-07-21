@@ -79,6 +79,6 @@ class ClinicalTrialPreprocessor:
 
 if __name__ == "__main__":
     processor = ClinicalTrialPreprocessor()
-    raw = processor.load_raw_file()
+    raw = processor.load_raw_files()
     _ = processor.preprocess(raw)
     print("🚀 Preprocessing completed.")
