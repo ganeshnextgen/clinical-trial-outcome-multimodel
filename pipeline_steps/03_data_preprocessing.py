@@ -26,16 +26,28 @@ class ClinicalTrialPreprocessor:
 
     def preprocess(self, df):
         print("🧹 Cleaning and encoding data...")
-        # Outcome
-        succ = ['Completed', 'Active, not recruiting', 'Recruiting', 'Enrolling by invitation']
-        fail = ['Terminated', 'Withdrawn', 'Suspended']
+    
+        # Case-insensitive matching for outcome
+        succ = ['completed', 'active, not recruiting', 'recruiting', 'enrolling by invitation']
+        fail = ['terminated', 'withdrawn', 'suspended', 'no longer available', 'temporarily not available']
+    
         def outcome(status, reason):
-            if status in succ: return 1
-            if status in fail: return 0
-            if reason and str(reason).strip(): return 0
+            if pd.isna(status):
+                return np.nan
+            s = str(status).strip().lower()
+            if s in succ:
+                return 1
+            if s in fail:
+                return 0
+            if pd.notna(reason) and str(reason).strip() != "":
+                return 0
             return np.nan
-        df['outcome'] = df.apply(lambda r: outcome(r['overall_status'], r.get('why_stopped')), axis=1)
+    
+        df['outcome'] = df.apply(lambda r: outcome(r.get('overall_status'), r.get('why_stopped')), axis=1)
         df = df.dropna(subset=['outcome'])
+        
+        print(f"✅ Outcome labeling complete. Remaining trials: {len(df)}")
+        return df
 
         # Text cleaning and join
         text_cols = ['brief_title', 'official_title', 'brief_summary', 'detailed_description']
