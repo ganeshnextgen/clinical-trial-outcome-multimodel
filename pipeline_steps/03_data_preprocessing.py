@@ -44,10 +44,9 @@ class ClinicalTrialPreprocessor:
             return np.nan
     
         df['outcome'] = df.apply(lambda r: outcome(r.get('overall_status'), r.get('why_stopped')), axis=1)
-        df = df.dropna(subset=['outcome'])
+        df = df.dropna(subset=['outcome']).copy()
         
         print(f"✅ Outcome labeling complete. Remaining trials: {len(df)}")
-        return df
 
         # Text cleaning and join
         text_cols = ['brief_title', 'official_title', 'brief_summary', 'detailed_description']
