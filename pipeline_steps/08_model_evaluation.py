@@ -1,120 +1,116 @@
 #!/usr/bin/env python3
 """
-Step 8: Model Evaluation & Threshold Optimization
-Comprehensive evaluation with threshold optimization for failure recall
+Step 08: Model Evaluation + Threshold Optimization
 """
 
-import numpy as np
 import pandas as pd
+import numpy as np
 from pathlib import Path
-import joblib
-import json
-from datetime import datetime
+from sklearn.metrics import (
+    confusion_matrix, classification_report, roc_auc_score,
+    precision_score, recall_score, fbeta_score
+)
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import (
-    classification_report, confusion_matrix, roc_curve, auc,
-    precision_recall_curve, fbeta_score, recall_score, precision_score
-)
+import joblib
+import json
 
 class ModelEvaluator:
-    """Model evaluation with threshold optimization for failure recall."""
-    def __init__(self, input_dir="data/processed", models_dir="models", output_dir="results"):
-        self.input_dir = Path(input_dir)
-        self.models_dir = Path(models_dir)
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.optimal_threshold = 0.5
-        
-    def load_model_and_data(self):
-        model_files = list(self.models_dir.glob("balanced_rf_model_*.pkl"))
-        if not model_files:
-            raise FileNotFoundError("No trained model found. Run Step 7 first.")
-        latest_model_file = max(model_files, key=lambda x: x.stat().st_mtime)
-        model = joblib.load(latest_model_file)
-        splits_files = list(self.input_dir.glob("data_splits_*.pkl"))
-        if not splits_files:
-            raise FileNotFoundError("No test splits found. Run Step 6 first.")
-        latest_splits_file = max(splits_files, key=lambda x: x.stat().st_mtime)
-        splits = joblib.load(latest_splits_file)
-        print(f"📂 Loaded model: {latest_model_file}")
-        print(f"📂 Loaded test data: {latest_splits_file}")
-        print(f"📊 Test set shape: {splits['X_test'].shape}")
-        return model, splits
-    
-    def optimize_threshold_for_recall(self, model, X_val, y_val, beta=2.0):
-        print(f"🎯 OPTIMIZING THRESHOLD FOR FAILURE RECALL (β={beta})")
-        y_proba = model.predict_proba(X_val)[:, 1]
-        thresholds = np.arange(0.05, 0.95, 0.01)
+    """Evaluate model and optimize threshold"""
+
+    def __init__(self, model_dir="models", data_dir="data/processed", result_dir="results"):
+        self.model_dir = Path(model_dir)
+        self.data_dir = Path(data_dir)
+        self.result_dir = Path(result_dir)
+        self.result_dir.mkdir(parents=True, exist_ok=True)
+
+    def load_latest_model(self):
+        models = sorted(self.model_dir.glob("model_*.pkl"))
+        if not models:
+            raise FileNotFoundError("No trained model found.")
+        latest = models[-1]
+        model = joblib.load(latest)
+        print(f"📂 Loaded model: {latest.name}")
+        return model, latest
+
+    def load_test_data(self):
+        data_path = self.data_dir / "data_splits.pkl"
+        if not data_path.exists():
+            raise FileNotFoundError("No data splits found.")
+        splits = joblib.load(data_path)
+        print(f"📂 Loaded test set from: {data_path.name}")
+        return splits["X_test"], splits["y_test"]
+
+    def evaluate(self, model, X_test, y_test):
+        probs = model.predict_proba(X_test)[:, 1]
+        report_at_05 = self._evaluate_at_threshold(y_test, probs, threshold=0.5)
+        threshold_opt = self._find_best_threshold(y_test, probs)
+        report_at_opt = self._evaluate_at_threshold(y_test, probs, threshold=threshold_opt)
+
+        self._save_conf_matrix(y_test, probs, [0.5, threshold_opt])
+        self._save_json_reports(report_at_05, report_at_opt, threshold_opt)
+
+        return report_at_opt
+
+    def _evaluate_at_threshold(self, y_true, probas, threshold):
+        preds = (probas >= threshold).astype(int)
+        report = classification_report(y_true, preds, output_dict=True)
+        report["roc_auc"] = roc_auc_score(y_true, probas)
+        report["threshold"] = threshold
+        report["failure_recall"] = recall_score(y_true, preds, pos_label=0)
+        report["failure_precision"] = precision_score(y_true, preds, pos_label=0, zero_division=0)
+        print(f"📊 Threshold = {threshold:.2f}")
+        print(classification_report(y_true, preds, target_names=["Failure", "Success"]))
+        return report
+
+    def _find_best_threshold(self, y_true, probas):
+        best_t = 0.5
         best_score = 0
-        best_threshold = 0.5
-        scores = []
-        recalls_failure = []
-        precisions_failure = []
-        for threshold in thresholds:
-            y_pred_threshold = (y_proba >= threshold).astype(int)
-            score = fbeta_score(y_val, y_pred_threshold, beta=beta, zero_division=0)
-            recall_fail = recall_score(y_val, y_pred_threshold, pos_label=0, zero_division=0)
-            precision_fail = precision_score(y_val, y_pred_threshold, pos_label=0, zero_division=0)
-            scores.append(score)
-            recalls_failure.append(recall_fail)
-            precisions_failure.append(precision_fail)
+        for t in np.arange(0.1, 0.91, 0.01):
+            preds = (probas >= t).astype(int)
+            score = fbeta_score(y_true, preds, beta=2.0, zero_division=0)
             if score > best_score:
                 best_score = score
-                best_threshold = threshold
-        self.optimal_threshold = best_threshold
-        print(f"✅ Optimal threshold: {best_threshold:.3f}")
-        print(f"✅ Best F{beta}-score: {best_score:.3f}")
-        return best_threshold, scores, recalls_failure, precisions_failure
-    
-    def evaluate_model(self, model, splits):
-        X_test, y_test = splits['X_test'], splits['y_test']
-        y_proba = model.predict_proba(X_test)[:, 1]
-        y_pred_optimized = (y_proba >= self.optimal_threshold).astype(int)
-        y_pred_standard = (y_proba >= 0.5).astype(int)
-        print("🔸 STANDARD THRESHOLD (0.5) RESULTS:")
-        print(classification_report(y_test, y_pred_standard, target_names=['Failure', 'Success']))
-        print(f"\n🔹 OPTIMIZED THRESHOLD ({self.optimal_threshold:.3f}) RESULTS:")
-        print(classification_report(y_test, y_pred_optimized, target_names=['Failure', 'Success']))
-        cm_standard = confusion_matrix(y_test, y_pred_standard)
-        cm_optimized = confusion_matrix(y_test, y_pred_optimized)
-        roc_auc = auc(*roc_curve(y_test, y_proba)[:2])
-        print(f"\n🎯 ROC-AUC: {roc_auc:.3f}")
-        print(f"📊 Failure Recall Standard: {recall_score(y_test, y_pred_standard, pos_label=0):.3f}, Optimized: {recall_score(y_test, y_pred_optimized, pos_label=0):.3f}")
-        return {
-            'optimal_threshold': self.optimal_threshold,
-            'cm_standard': cm_standard.tolist(),
-            'cm_optimized': cm_optimized.tolist(),
-            'roc_auc': roc_auc,
-            'classification_report_standard': classification_report(y_test, y_pred_standard, output_dict=True),
-            'classification_report_optimized': classification_report(y_test, y_pred_optimized, output_dict=True)
+                best_t = t
+        print(f"🎯 Optimal F2 threshold: {best_t:.2f}, F2 Score: {best_score:.3f}")
+        return best_t
+
+    def _save_conf_matrix(self, y_true, probas, thresholds):
+        for t in thresholds:
+            preds = (probas >= t).astype(int)
+            cm = confusion_matrix(y_true, preds)
+            fig, ax = plt.subplots(figsize=(4, 4))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                        xticklabels=["Failure", "Success"],
+                        yticklabels=["Failure", "Success"])
+            plt.title(f"Confusion Matrix (Threshold={t:.2f})")
+            plt.ylabel('Actual')
+            plt.xlabel('Predicted')
+            plot_file = self.result_dir / f"conf_matrix_threshold_{t:.2f}.png"
+            plt.tight_layout()
+            plt.savefig(plot_file)
+            plt.close()
+            print(f"✅ Saved plot: {plot_file.name}")
+
+    def _save_json_reports(self, report_05, report_opt, threshold_opt):
+        summary = {
+            "standard_threshold": 0.5,
+            "optimized_threshold": threshold_opt,
+            "standard": report_05,
+            "optimized": report_opt
         }
-    
-    def plot_confusion_matrices(self, eval_results):
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        sns.heatmap(eval_results['cm_standard'], annot=True, fmt='d', cmap='Blues', ax=axes[^62_0])
-        axes[^62_0].set_title('Standard Threshold (0.5)')
-        axes[^62_0].set_ylabel('Actual')
-        axes[^62_0].set_xlabel('Predicted')
-        sns.heatmap(eval_results['cm_optimized'], annot=True, fmt='d', cmap='Oranges', ax=axes[^62_1])
-        axes[^62_1].set_title(f'Optimized ({eval_results["optimal_threshold"]:.3f})')
-        axes[^62_1].set_ylabel('Actual')
-        axes[^62_1].set_xlabel('Predicted')
-        plt.tight_layout()
-        plt.savefig(self.output_dir / 'confusion_matrix_comparison.png', dpi=300)
-        plt.close()
-        print(f"📊 Confusion matrices plot saved.")
-        
+        report_file = self.result_dir / "evaluation_report.json"
+        with open(report_file, "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"✅ Evaluation report saved: {report_file.name}")
+
 def main():
-    print("🚀 STEP 8: MODEL EVALUATION & THRESHOLD OPTIMIZATION")
+    print("🚀 STEP 08: Evaluate Model")
     evaluator = ModelEvaluator()
-    model, splits = evaluator.load_model_and_data()
-    best_threshold, scores, recalls, precisions = evaluator.optimize_threshold_for_recall(
-        model, splits['X_val'], splits['y_val'], beta=2.0)
-    eval_results = evaluator.evaluate_model(model, splits)
-    evaluator.plot_confusion_matrices(eval_results)
-    print("✅ Step 8 completed: Evaluation and threshold optimization complete.")
-    return
+    model, _ = evaluator.load_latest_model()
+    X_test, y_test = evaluator.load_test_data()
+    evaluator.evaluate(model, X_test, y_test)
+    print("✅ Step 08 completed ✅")
 
 if __name__ == "__main__":
     main()
