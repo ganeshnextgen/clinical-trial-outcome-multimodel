@@ -90,7 +90,7 @@ class ClinicalTrialsWebCollector:
 if __name__ == "__main__":
     collector = ClinicalTrialsWebCollector("data")
     # Example: download 300 cancer, diabetes and hypertension trials
-    _ = collector.search_trials("cancer", 300)
-    _ = collector.search_trials("diabetes", 300)
-    _ = collector.search_trials("hypertension", 300)
+    _ = collector.search_trials("cancer", 500)
+    _ = collector.search_trials("diabetes", 500)
+    _ = collector.search_trials("hypertension", 500)
     print("🚀 Data collection completed.")
