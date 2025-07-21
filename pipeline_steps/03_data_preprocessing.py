@@ -16,13 +16,21 @@ class ClinicalTrialPreprocessor:
         self.processed_dir.mkdir(parents=True, exist_ok=True)
         self.label_encoders = {}
 
-    def load_raw_file(self):
+    def load_raw_files(self):
         files = sorted(self.data_dir.glob("raw_clinical_trials_*.csv"))
-        if not files: raise FileNotFoundError("No raw files found.")
-        file = files[-1]
-        df = pd.read_csv(file)
-        print(f"📂 Loaded: {file}")
-        return df
+        if not files:
+            raise FileNotFoundError("No raw files found.")
+        
+        all_dfs = []
+        for file in files:
+            print(f"📂 Loading: {file}")
+            df = pd.read_csv(file)
+            all_dfs.append(df)
+        
+        combined_df = pd.concat(all_dfs, ignore_index=True)
+        print(f"✅ Loaded and combined {len(files)} files.")
+        return combined_df
+
 
     def preprocess(self, df):
         print("🧹 Cleaning and encoding data...")
